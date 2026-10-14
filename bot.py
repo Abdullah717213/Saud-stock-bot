@@ -383,15 +383,18 @@ def analyze_stock(symbol):
     candles = detect_candle(df)
 
 # فحص استعادة المتوسطات EMA وSMA
-averages = {}
+    averages = {}
 
-for kind in ["EMA", "SMA"]:
-    for period in [20, 30, 50, 200]:
-        name = f"{kind}{period}"
-        value = number(current[name])
-        averages[name] = value
+    for kind in ["EMA", "SMA"]:
+        for period in [20, 30, 50, 200]:
+            name = f"{kind}{period}"
+            value = number(current[name])
+            averages[name] = value
 
-recovered_averages = [
+    recovered_averages = [
+        name for name, value in averages.items()
+        if value is not None and price > value
+    ]
     name for name, value in averages.items()
     if value is not None and price > value
 ]
