@@ -395,9 +395,6 @@ def analyze_stock(symbol):
         name for name, value in averages.items()
         if value is not None and price > value
     ]
-    name for name, value in averages.items()
-    if value is not None and price > value
-]
 
     # هل ارتفع السهم بقوة خلال آخر 20 جلسة؟
     close20 = number(df["Close"].iloc[-21])
