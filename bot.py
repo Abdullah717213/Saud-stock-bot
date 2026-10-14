@@ -382,17 +382,19 @@ def analyze_stock(symbol):
 
     candles = detect_candle(df)
 
-    # استعادة المتوسطات
-    averages = {}
+# فحص استعادة المتوسطات EMA وSMA
+averages = {}
 
+for kind in ["EMA", "SMA"]:
     for period in [20, 30, 50, 200]:
-        value = number(current[f"SMA{period}"])
-        averages[f"SMA{period}"] = value
+        name = f"{kind}{period}"
+        value = number(current[name])
+        averages[name] = value
 
-    recovered_averages = [
-        name for name, value in averages.items()
-        if value is not None and price > value
-    ]
+recovered_averages = [
+    name for name, value in averages.items()
+    if value is not None and price > value
+]
 
     # هل ارتفع السهم بقوة خلال آخر 20 جلسة؟
     close20 = number(df["Close"].iloc[-21])
