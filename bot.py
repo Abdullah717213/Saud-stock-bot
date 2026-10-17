@@ -562,6 +562,24 @@ def classify_stock(
 # ==========================================
 
 def analyze_stock(symbol):
+    # التحقق من Float قبل التحليل الفني
+    company = get_company_data(symbol)
+    float_shares = company["float"]
+
+    if float_shares is None:
+        print(f"❌ {symbol}: بيانات Float غير متوفرة")
+        return
+
+    if float_shares >= 5_000_000:
+        print(
+            f"❌ {symbol}: Float يبلغ "
+            f"{float_shares:,.0f} سهم، تم استبعاده"
+        )
+        return
+
+    print(
+        f"✅ {symbol}: Float أقل من 5 ملايين سهم"
+    )
     print("\n" + "=" * 48)
     print(f"فحص السهم: {symbol}")
     print("=" * 48)
@@ -801,19 +819,7 @@ def analyze_stock(symbol):
 
     print("\nبيانات الشركة:")
 
-    company = get_company_data(symbol)
-    float_shares = company["float"]
 
-    if float_shares is None:
-        print("❌ مستبعد: بيانات Float غير متوفرة")
-        return
-
-    if float_shares >= 5_000_000:
-        print(
-        f"❌ مستبعد: Float يبلغ {float_shares:,.0f} سهم "
-        "والحد المطلوب أقل من 5 ملايين"
-    )
-    return
     print(f"Float: {fmt(company['float'])}")
     print(f"Shares Short: {fmt(company['short'])}")
     print(
