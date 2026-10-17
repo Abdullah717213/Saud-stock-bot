@@ -513,12 +513,12 @@ def classify_stock(
         score += 1
         reasons.append("السعر أعلى من بعض المتوسطات المتحركة")
 
-    # لا نعتبر السهم مرشحاً للدخول بمجرد انخفاض RSI
+# لا نعتبر السهم مرشحاً للدخول بمجرد انخفاض RSI
     if support is not None and price < support:
         status = "🔴 تجنب الدخول حاليًا"
         reasons.append("السعر أسفل الدعم التقريبي")
 
-   elif (
+    elif (
         score >= 5
         and sweep
         and candle in [
