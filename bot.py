@@ -804,9 +804,16 @@ def analyze_stock(symbol):
     company = get_company_data(symbol)
     float_shares = company["float"]
 
-    if float_shares is None or float_shares >= 5_000_000:
-        print("❌ مستبعد: Float غير متوفر أو يساوي 5 ملايين أو أكثر")
-        return
+    if float_shares is None:
+    print("❌ مستبعد: بيانات Float غير متوفرة")
+    return
+
+if float_shares >= 5_000_000:
+    print(
+        f"❌ مستبعد: Float يبلغ {float_shares:,.0f} سهم "
+        "والحد المطلوب أقل من 5 ملايين"
+    )
+    return
     print(f"Float: {fmt(company['float'])}")
     print(f"Shares Short: {fmt(company['short'])}")
     print(
