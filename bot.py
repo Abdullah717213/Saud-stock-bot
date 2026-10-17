@@ -703,7 +703,7 @@ def analyze_stock(symbol):
     else:
         print("بيانات غير كافية")
 
-    print("\nمستويات فنية تقديرية:")
+print("\nمستويات فنية تقديرية:")
 
     stop = None
     target = None
@@ -713,23 +713,23 @@ def analyze_stock(symbol):
     if support is not None and support > 0:
         stop = support * 0.98
 
-    if support <= price <= support * 1.03:
+        if support <= price <= support * 1.03:
             entry_low = support
             entry_high = support * 1.02
 
-# البحث عن أقرب هدف فني أعلى من السعر
-candidates = []
+    # البحث عن أقرب هدف فني أعلى من السعر
+    candidates = []
 
-if resistance is not None and resistance > price:
-    candidates.append(resistance)
+    if resistance is not None and resistance > price:
+        candidates.append(resistance)
 
-for name in ["EMA20", "SMA20", "EMA30", "SMA30", "EMA50", "SMA50"]:
-    value = number(current[name])
-    if value is not None and value > price:
-        candidates.append(value)
+    for name in ["EMA20", "SMA20", "EMA30", "SMA30", "EMA50", "SMA50"]:
+        value = number(current[name])
+        if value is not None and value > price:
+            candidates.append(value)
 
-if candidates:
-    target = min(candidates)
+    if candidates:
+        target = min(candidates)
 
     print(
         f"منطقة دخول للمراقبة: "
