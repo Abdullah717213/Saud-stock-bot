@@ -206,9 +206,39 @@ def add_indicators(df):
     # متوسط حجم التداول
     df["VolumeAvg20"] = df["Volume"].rolling(20).mean()
 
-    # أقل وأعلى سعر خلال الفترات السابقة
-    df["Support20"] = df["Low"].shift(1).rolling(20).min()
-    df["Resistance60"] = df["High"].shift(1).rolling(60).max()
+    # استبعاد الشمعة الحالية لتجنب اعتبارها مستوى سابقًا
+
+df["Support20"] = (
+    df["Low"]
+    .shift(1)
+    .rolling(20)
+    .min()
+)
+
+df["Resistance60"] = (
+    df["High"]
+    .shift(1)
+    .rolling(60)
+    .max()
+)
+
+# تحديد أقرب مقاومة سابقة فوق السعر
+df["NearestResistance"] = np.nan
+
+for i in range(60, len(df)):
+    price = df["Close"].iloc[i]
+
+    previous_highs = df["High"].iloc[i - 60:i]
+
+    levels = previous_highs[
+        previous_highs > price
+    ]
+
+    if not levels.empty:
+        df.iloc[
+            i,
+            df.columns.get_loc("NearestResistance")
+        ] = levels.min()
 
     return df
 
