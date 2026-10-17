@@ -546,8 +546,9 @@ def classify_stock(
             "اختراق نموذج W مع ظهور شمعة إيجابية"
         )
 
-    elif score >= 2 or near_support or (
-        rsi is not None and rsi < 30
+   elif (
+        score >= 2
+        or near_support
     ):
         status = "🟡 تحت المراقبة"
 
