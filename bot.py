@@ -518,12 +518,9 @@ def classify_stock(
         status = "🔴 تجنب الدخول حاليًا"
         reasons.append("السعر أسفل الدعم التقريبي")
 
-    elif (
+   elif (
         score >= 5
-        and (
-            sweep
-            or w_pattern["confirmed"]
-        )
+        and sweep
         and candle in [
             "ابتلاع شرائي محتمل",
             "مطرقة محتملة",
@@ -531,6 +528,23 @@ def classify_stock(
         ]
     ):
         status = "🟢 مرشح للدراسة والدخول المشروط"
+        reasons.append(
+            "اجتمعت إشارة سحب السيولة مع شمعة إيجابية"
+        )
+
+    elif (
+        score >= 4
+        and w_pattern["confirmed"]
+        and candle in [
+            "ابتلاع شرائي محتمل",
+            "مطرقة محتملة",
+            "شمعة صاعدة قوية"
+        ]
+    ):
+        status = "🟢 مرشح للدراسة بعد اختراق نموذج W"
+        reasons.append(
+            "اختراق نموذج W مع ظهور شمعة إيجابية"
+        )
 
     elif score >= 2 or near_support or (
         rsi is not None and rsi < 30
