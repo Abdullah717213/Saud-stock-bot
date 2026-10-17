@@ -264,7 +264,7 @@ for i in range(60, len(df)):
             df.columns.get_loc("NearestResistance")
         ] = levels.min()
 
-return df
+    return df
 
 
 # ==========================================
