@@ -1,116 +1,158 @@
-import csv
-import math
 import os
-import time
 import warnings
-
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
 warnings.filterwarnings("ignore")
 
 # ==========================================
-# إعدادات الفحص - مبنية على منهج فيصل
+# إعدادات البوت - منهج فيصل
 # ==========================================
+
+WATCHLIST_FILE = "watchlist.csv"
+PERIOD = "1y"
+INTERVAL = "1d"
 
 RSI_MIN = 23
 RSI_MAX = 27
 
-SUPPORT_LOOKBACK = 20
-LOW_LOOKBACK = 60
-VOLUME_LOOKBACK = 20
+SUPPORT_WINDOW = 20
+RESISTANCE_WINDOW = 60
 
-# لا تعتبر هذه الأوزان توصية شراء.
-# هي طريقة لترتيب الأسهم حسب اكتمال شروط الفحص.
-MIN_WATCH_SCORE = 5
+MIN_DATA_ROWS = 210
 
 
-def number(value, default=None):
-    """تحويل القيمة إلى رقم آمن."""
+# ==========================================
+# أدوات مساعدة
+# ==========================================
+
+def number(value):
     try:
-        value = float(value)
-        if math.isfinite(value):
-            return value
+        result = float(value)
+        if np.isfinite(result):
+            return result
     except (TypeError, ValueError):
         pass
-    return default
+    return None
+
+
+def fmt(value):
+    value = number(value)
+    return "غير متوفر" if value is None else f"{value:.4f}"
 
 
 def load_watchlist():
-    """قراءة قائمة الأسهم."""
-    if not os.path.exists("watchlist.csv"):
-        print("خطأ: ملف watchlist.csv غير موجود.")
+    if not os.path.exists(WATCHLIST_FILE):
+        print(f"لم يتم العثور على {WATCHLIST_FILE}")
         return []
 
-    with open(
-        "watchlist.csv",
-        newline="",
-        encoding="utf-8-sig"
-    ) as file:
-        reader = csv.DictReader(file)
-        symbols = []
+    try:
+        data = pd.read_csv(WATCHLIST_FILE)
 
-        for row in reader:
-            symbol = row.get("symbol", "").strip().upper()
-            if symbol:
-                symbols.append(symbol)
+        if data.empty:
+            return []
 
-        return list(dict.fromkeys(symbols))
+        # دعم أسماء الأعمدة الشائعة
+        column = next(
+            (
+                col for col in data.columns
+                if str(col).strip().lower()
+                in ["symbol", "ticker", "symbols", "رمز", "السهم"]
+            ),
+            data.columns[0]
+        )
+
+        symbols = (
+            data[column]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .tolist()
+        )
+
+        return list(dict.fromkeys(
+            s for s in symbols
+            if s and s not in ["SYMBOL", "TICKER", "NAN"]
+        ))
+
+    except Exception as exc:
+        print(f"خطأ في قراءة قائمة الأسهم: {exc}")
+        return []
 
 
 def download_daily(symbol):
-    """تحميل بيانات يومية للتحليل الفني."""
-    df = yf.download(
-        symbol,
-        period="1y",
-        interval="1d",
-        auto_adjust=True,
-        progress=False,
-        threads=False
-    )
+    try:
+        df = yf.download(
+            symbol,
+            period=PERIOD,
+            interval=INTERVAL,
+            auto_adjust=True,
+            progress=False,
+            threads=False
+        )
 
-    if df.empty:
+        if df is None or df.empty:
+            print(f"لا توجد بيانات للسهم {symbol}")
+            return None
+
+        # معالجة الأعمدة متعددة المستويات في yfinance
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [
+                col[0] if isinstance(col, tuple) else col
+                for col in df.columns
+            ]
+
+        df.columns = [str(c).title() for c in df.columns]
+
+        required = ["Open", "High", "Low", "Close", "Volume"]
+
+        if not all(col in df.columns for col in required):
+            print(f"بيانات OHLCV غير مكتملة للسهم {symbol}")
+            return None
+
+        df = df[required].copy()
+
+        for col in required:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df = df.dropna(subset=["Open", "High", "Low", "Close"])
+
+        if len(df) < 60:
+            print(f"بيانات تاريخية غير كافية للسهم {symbol}")
+            return None
+
+        return df
+
+    except Exception as exc:
+        print(f"تعذر تحميل {symbol}: {exc}")
         return None
 
-    # معالجة اختلاف شكل الأعمدة في yfinance
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
 
-    required = ["Open", "High", "Low", "Close", "Volume"]
-
-    if not all(col in df.columns for col in required):
-        return None
-
-    df = df[required].copy()
-
-    for col in required:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    df = df.dropna(subset=["Open", "High", "Low", "Close"])
-
-    if len(df) < 60:
-        return None
-
-    return df
-
+# ==========================================
+# المؤشرات الفنية
+# ==========================================
 
 def add_indicators(df):
-    """حساب المؤشرات الفنية."""
+    df = df.copy()
+
     close = df["Close"]
-    high = df["High"]
-    low = df["Low"]
-    volume = df["Volume"]
 
     # المتوسطات المتحركة
     for period in [20, 30, 50, 200]:
-        df[f"SMA{period}"] = close.rolling(period).mean()
         df[f"EMA{period}"] = close.ewm(
             span=period,
             adjust=False
         ).mean()
 
-    # RSI 14
+        df[f"SMA{period}"] = close.rolling(
+            period
+        ).mean()
+
+    # RSI - طريقة Wilder
     delta = close.diff()
+
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
@@ -126,97 +168,175 @@ def add_indicators(df):
         adjust=False
     ).mean()
 
-    rs = avg_gain / avg_loss.replace(0, float("nan"))
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+
     df["RSI"] = 100 - (100 / (1 + rs))
 
+    # معالجة حالة عدم وجود خسائر
+    df.loc[
+        (avg_loss == 0) & (avg_gain > 0),
+        "RSI"
+    ] = 100
+
+    df.loc[
+        (avg_loss == 0) & (avg_gain == 0),
+        "RSI"
+    ] = 50
+
     # MACD
-    ema12 = close.ewm(span=12, adjust=False).mean()
-    ema26 = close.ewm(span=26, adjust=False).mean()
+    ema12 = close.ewm(
+        span=12,
+        adjust=False
+    ).mean()
+
+    ema26 = close.ewm(
+        span=26,
+        adjust=False
+    ).mean()
 
     df["MACD"] = ema12 - ema26
-    df["MACD_SIGNAL"] = df["MACD"].ewm(
+
+    df["Signal"] = df["MACD"].ewm(
         span=9,
         adjust=False
     ).mean()
 
-    df["MACD_HIST"] = df["MACD"] - df["MACD_SIGNAL"]
+    df["Histogram"] = df["MACD"] - df["Signal"]
 
-    # متوسط الفوليوم
-    df["AVG_VOLUME"] = volume.rolling(
-        VOLUME_LOOKBACK
-    ).mean()
+    # متوسط حجم التداول
+    df["VolumeAvg20"] = df["Volume"].rolling(20).mean()
 
-    # متوسط نطاق الشمعة
-    df["RANGE"] = high - low
+    # أقل وأعلى سعر خلال الفترات السابقة
+    df["Support20"] = df["Low"].shift(1).rolling(20).min()
+    df["Resistance60"] = df["High"].shift(1).rolling(60).max()
 
     return df
 
 
-def detect_candle(df):
-    """فحص أولي للمطرقة والابتلاع الشرائي."""
-    if len(df) < 2:
-        return []
+# ==========================================
+# تحليل الشموع
+# ==========================================
 
-    current = df.iloc[-1]
+def detect_candle(df):
+    if len(df) < 3:
+        return "بيانات غير كافية"
+
+    last = df.iloc[-1]
     previous = df.iloc[-2]
 
-    o = number(current["Open"], 0)
-    h = number(current["High"], 0)
-    l = number(current["Low"], 0)
-    c = number(current["Close"], 0)
+    o = number(last["Open"])
+    h = number(last["High"])
+    l = number(last["Low"])
+    c = number(last["Close"])
+
+    po = number(previous["Open"])
+    pc = number(previous["Close"])
+
+    if None in [o, h, l, c, po, pc]:
+        return "بيانات غير مكتملة"
 
     body = abs(c - o)
-    full_range = h - l
+    candle_range = h - l
 
-    if full_range <= 0:
-        return []
+    if candle_range <= 0:
+        return "شمعة غير واضحة"
 
-    upper_shadow = h - max(o, c)
-    lower_shadow = min(o, c) - l
-
-    patterns = []
-
-    # مطرقة تقريبية: ذيل سفلي طويل وإغلاق قرب أعلى الشمعة
-    if (
-        lower_shadow >= max(body * 2, full_range * 0.4)
-        and upper_shadow <= full_range * 0.3
-        and c > l + full_range * 0.6
-    ):
-        patterns.append("مطرقة محتملة")
+    lower_wick = min(o, c) - l
+    upper_wick = h - max(o, c)
 
     # ابتلاع شرائي
-    prev_o = number(previous["Open"], 0)
-    prev_c = number(previous["Close"], 0)
-
     if (
-        prev_c < prev_o
+        pc < po
         and c > o
-        and o <= prev_c
-        and c >= prev_o
+        and o <= pc
+        and c >= po
     ):
-        patterns.append("ابتلاع شرائي محتمل")
+        return "ابتلاع شرائي محتمل"
 
-    # رفض كسر داخل الشمعة
-    if lower_shadow > body * 1.5 and c > o:
-        patterns.append("ذيل سفلي مع إغلاق إيجابي")
+    # مطرقة محتملة
+    if (
+        lower_wick >= body * 2
+        and upper_wick <= max(body, candle_range * 0.15)
+        and c > l + candle_range * 0.55
+    ):
+        return "مطرقة محتملة"
 
-    return patterns
+    # شمعة صاعدة قوية
+    if (
+        c > o
+        and body >= candle_range * 0.60
+    ):
+        return "شمعة صاعدة قوية"
 
+    # شمعة هابطة
+    if c < o and body >= candle_range * 0.60:
+        return "شمعة هابطة قوية"
+
+    return "لا توجد شمعة انعكاس واضحة"
+
+
+# ==========================================
+# فحص سحب السيولة واستعادة الدعم
+# ==========================================
+
+def detect_liquidity_sweep(df):
+    """
+    فحص تقريبي:
+    هبوط أدنى من قيعان سابقة ثم إغلاق فوق مستوى القاع السابق.
+
+    لا يثبت هذا الفحص وجود سحب سيولة مؤسسي.
+    """
+
+    if len(df) < 22:
+        return False, None
+
+    last = df.iloc[-1]
+
+    previous_lows = df["Low"].iloc[-21:-1]
+
+    if previous_lows.empty:
+        return False, None
+
+    previous_support = number(previous_lows.min())
+    last_low = number(last["Low"])
+    last_close = number(last["Close"])
+
+    if None in [previous_support, last_low, last_close]:
+        return False, previous_support
+
+    swept = last_low < previous_support
+    reclaimed = last_close > previous_support
+
+    return swept and reclaimed, previous_support
+
+
+# ==========================================
+# فحص نموذج W
+# ==========================================
 
 def detect_w_pattern(df):
     """
-    بحث تقريبي عن قاعين متقاربين.
-    يحتاج مراجعة الرسم؛ ليس كشفًا مضمونًا لنموذج W.
+    فحص تقريبي لقاعين متقاربين.
+    لا يعتمد على نموذج إحصائي مؤكد.
     """
+
     if len(df) < 40:
-        return False, None
+        return {
+            "possible": False,
+            "confirmed": False,
+            "neckline": None,
+            "reason": "بيانات غير كافية"
+        }
 
-    recent = df.tail(40)
-    lows = recent["Low"].tolist()
-    highs = recent["High"].tolist()
+    recent = df.tail(60).copy()
 
-    pivots = []
+    lows = recent["Low"].to_numpy()
+    highs = recent["High"].to_numpy()
+    closes = recent["Close"].to_numpy()
 
+    candidates = []
+
+    # استخراج القيعان المحلية
     for i in range(2, len(lows) - 2):
         if (
             lows[i] <= lows[i - 1]
@@ -224,67 +344,87 @@ def detect_w_pattern(df):
             and lows[i] <= lows[i + 1]
             and lows[i] <= lows[i + 2]
         ):
-            pivots.append(i)
+            candidates.append(i)
 
-    if len(pivots) < 2:
-        return False, None
+    if len(candidates) < 2:
+        return {
+            "possible": False,
+            "confirmed": False,
+            "neckline": None,
+            "reason": "لم يظهر قاعان محليان واضحان"
+        }
 
-    first = pivots[-2]
-    second = pivots[-1]
+    # البحث عن آخر قاعين متقاربين
+    for j in range(len(candidates) - 1, 0, -1):
+        second_idx = candidates[j]
 
-    if second - first < 5:
-        return False, None
+        for k in range(j - 1, -1, -1):
+            first_idx = candidates[k]
 
-    low1 = lows[first]
-    low2 = lows[second]
+            distance = second_idx - first_idx
 
-    if low1 <= 0:
-        return False, None
+            if distance < 5 or distance > 35:
+                continue
 
-    difference = abs(low1 - low2) / low1
+            first_low = lows[first_idx]
+            second_low = lows[second_idx]
 
-    # القاعان متقاربان نسبيًا
-    if difference > 0.04:
-        return False, None
+            if first_low <= 0 or second_low <= 0:
+                continue
 
-    neckline = max(highs[first:second + 1])
+            difference = abs(first_low - second_low) / (
+                (first_low + second_low) / 2
+            )
 
-    # نعرض النموذج حتى لو لم يخترق خط العنق،
-    # لكن نوضح أن التأكيد لم يحصل بعد.
-    return True, neckline
+            if difference > 0.04:
+                continue
 
+            neckline = float(
+                np.max(highs[first_idx:second_idx + 1])
+            )
+
+            current_close = float(closes[-1])
+
+            return {
+                "possible": True,
+                "confirmed": current_close > neckline,
+                "neckline": neckline,
+                "reason": (
+                    "اختراق خط العنق"
+                    if current_close > neckline
+                    else "لم يتأكد تجاوز خط العنق"
+                )
+            }
+
+    return {
+        "possible": False,
+        "confirmed": False,
+        "neckline": None,
+        "reason": "لم يظهر قاعان متقاربان بما يكفي"
+    }
+
+
+# ==========================================
+# معلومات الشركة
+# ==========================================
 
 def get_company_data(symbol):
-    """
-    محاولة جلب الفلووت والشورت والأخبار.
-    قد لا تتوفر هذه البيانات لكل سهم.
-    """
     result = {
         "float": None,
         "short": None,
-        "short_pct": None,
-        "news": []
+        "short_percent": None
     }
 
     try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.get_info()
+        info = yf.Ticker(symbol).info
 
-        result["float"] = info.get("floatShares")
-        result["short"] = info.get("sharesShort")
-        result["short_pct"] = info.get("shortPercentOfFloat")
+        result["float"] = number(info.get("floatShares"))
+        result["short"] = number(info.get("sharesShort"))
 
-        news_items = ticker.news or []
+        short_percent = number(info.get("shortPercentOfFloat"))
 
-        for item in news_items[:5]:
-            content = item.get("content", item)
-
-            title = content.get("title", "")
-
-            if not title:
-                continue
-
-            result["news"].append(title)
+        if short_percent is not None:
+            result["short_percent"] = short_percent * 100
 
     except Exception:
         pass
@@ -292,18 +432,133 @@ def get_company_data(symbol):
     return result
 
 
+# ==========================================
+# تصنيف الفرصة وإدارة المخاطر
+# ==========================================
+
+def classify_stock(
+    price,
+    rsi,
+    support,
+    resistance,
+    macd,
+    signal,
+    histogram,
+    previous_histogram,
+    volume,
+    average_volume,
+    candle,
+    sweep,
+    w_pattern,
+    recovered_averages
+):
+    reasons = []
+    score = 0
+
+    near_support = (
+        support is not None
+        and support > 0
+        and abs(price - support) / support <= 0.03
+    )
+
+    if near_support:
+        score += 1
+        reasons.append("السعر قريب من الدعم التقريبي")
+
+    if rsi is not None and RSI_MIN <= rsi <= RSI_MAX:
+        score += 1
+        reasons.append("RSI ضمن نطاق 23–27")
+
+    if sweep:
+        score += 2
+        reasons.append("كسر قاع سابق ثم استعادة المستوى")
+
+    macd_improving = (
+        histogram is not None
+        and previous_histogram is not None
+        and histogram > previous_histogram
+    )
+
+    if macd_improving:
+        score += 1
+        reasons.append("تحسن في زخم MACD")
+
+    if (
+        volume is not None
+        and average_volume is not None
+        and average_volume > 0
+        and volume > average_volume
+        and price > 0
+        and candle in [
+            "ابتلاع شرائي محتمل",
+            "مطرقة محتملة",
+            "شمعة صاعدة قوية"
+        ]
+    ):
+        score += 1
+        reasons.append("حجم أعلى من المتوسط مع شمعة صاعدة")
+
+    if candle in [
+        "ابتلاع شرائي محتمل",
+        "مطرقة محتملة",
+        "شمعة صاعدة قوية"
+    ]:
+        score += 1
+        reasons.append("ظهرت شمعة صاعدة محتملة")
+
+    if w_pattern["confirmed"]:
+        score += 2
+        reasons.append("اختراق محتمل لخط عنق نموذج W")
+
+    if recovered_averages:
+        score += 1
+        reasons.append("السعر أعلى من بعض المتوسطات المتحركة")
+
+    # لا نعتبر السهم مرشحاً للدخول بمجرد انخفاض RSI
+    if support is not None and price < support:
+        status = "🔴 تجنب الدخول حاليًا"
+        reasons.append("السعر أسفل الدعم التقريبي")
+
+    elif (
+        score >= 5
+        and (
+            sweep
+            or w_pattern["confirmed"]
+        )
+        and candle in [
+            "ابتلاع شرائي محتمل",
+            "مطرقة محتملة",
+            "شمعة صاعدة قوية"
+        ]
+    ):
+        status = "🟢 مرشح للدراسة والدخول المشروط"
+
+    elif score >= 2 or near_support or (
+        rsi is not None and rsi < 30
+    ):
+        status = "🟡 تحت المراقبة"
+
+    else:
+        status = "🔴 لا توجد فرصة واضحة حاليًا"
+
+    return status, score, reasons
+
+
+# ==========================================
+# التحليل الرئيسي
+# ==========================================
+
 def analyze_stock(symbol):
-    print("\n" + "=" * 45)
+    print("\n" + "=" * 48)
     print(f"فحص السهم: {symbol}")
-    print("=" * 45)
+    print("=" * 48)
 
-    df = download_daily(symbol)
+    raw = download_daily(symbol)
 
-    if df is None:
-        print("النتيجة: تعذر الحصول على بيانات كافية.")
+    if raw is None:
         return
 
-    df = add_indicators(df)
+    df = add_indicators(raw)
 
     current = df.iloc[-1]
     previous = df.iloc[-2]
@@ -311,78 +566,38 @@ def analyze_stock(symbol):
     price = number(current["Close"])
     previous_close = number(previous["Close"])
 
-    if price is None or previous_close is None:
-        print("النتيجة: بيانات السعر غير مكتملة.")
+    if price is None or price <= 0:
+        print("السعر غير متوفر")
         return
 
     daily_change = (
-        (price - previous_close) / previous_close
-    ) * 100 if previous_close else 0
+        (price - previous_close) / previous_close * 100
+        if previous_close and previous_close > 0
+        else None
+    )
 
     rsi = number(current["RSI"])
+
     macd = number(current["MACD"])
-    signal = number(current["MACD_SIGNAL"])
-    histogram = number(current["MACD_HIST"])
-    previous_hist = number(previous["MACD_HIST"])
+    signal = number(current["Signal"])
+    histogram = number(current["Histogram"])
+    previous_histogram = number(previous["Histogram"])
 
-    avg_volume = number(current["AVG_VOLUME"], 0)
-    latest_volume = number(current["Volume"], 0)
+    volume = number(current["Volume"])
+    average_volume = number(current["VolumeAvg20"])
 
-    # الدعم والقاع: نستثني الشمعة الحالية عند تحديد القاع السابق
-    previous_lows = df["Low"].iloc[-21:-1]
-    support20 = number(previous_lows.min())
+    support = number(current["Support20"])
+    resistance = number(current["Resistance60"])
 
-    low60 = number(df["Low"].tail(60).min())
+    print(f"السعر الحالي: ${price:.4f}")
 
-    # مقاومة تقريبية من القمم السابقة
-    previous_highs = df["High"].iloc[-21:-1]
-    resistance20 = number(previous_highs.max())
+    if daily_change is not None:
+        print(f"التغير اليومي: {daily_change:+.2f}%")
 
-    # الفحص الأولي لقرب السعر من الدعم
-    near_support = (
-        support20 is not None
-        and support20 > 0
-        and price <= support20 * 1.05
-    )
+    print(f"RSI: {fmt(rsi)}")
 
-    # سحب السيولة: كسر القاع السابق ثم الإغلاق فوقه
-    sweep_reclaim = (
-        support20 is not None
-        and number(current["Low"]) < support20
-        and price > support20
-    )
+    print("\nالمتوسطات:")
 
-    # هل تحسن MACD؟
-    macd_improving = (
-        histogram is not None
-        and previous_hist is not None
-        and histogram > previous_hist
-    )
-
-    macd_bullish_cross = (
-        macd is not None
-        and signal is not None
-        and macd > signal
-        and number(previous["MACD"])
-        is not None
-        and number(previous["MACD_SIGNAL"])
-        is not None
-        and number(previous["MACD"])
-        <= number(previous["MACD_SIGNAL"])
-    )
-
-    # الفوليوم مع شمعة صاعدة
-    bullish_candle = price > number(current["Open"], price)
-
-    volume_confirmation = (
-        avg_volume > 0
-        and latest_volume > avg_volume
-        and bullish_candle
-    )
-
-    candles = detect_candle(df)
-
-# فحص استعادة المتوسطات EMA وSMA
     averages = {}
 
     for kind in ["EMA", "SMA"]:
@@ -390,172 +605,220 @@ def analyze_stock(symbol):
             name = f"{kind}{period}"
             value = number(current[name])
             averages[name] = value
+            print(f"{name}: {fmt(value)}")
 
     recovered_averages = [
-        name for name, value in averages.items()
+        name
+        for name, value in averages.items()
         if value is not None and price > value
     ]
 
-    # هل ارتفع السهم بقوة خلال آخر 20 جلسة؟
-    close20 = number(df["Close"].iloc[-21])
-
-    rise20 = (
-        ((price / close20) - 1) * 100
-        if close20 and close20 > 0
-        else 0
-    )
-
-    chasing_warning = rise20 >= 50
-
-    # البحث التقريبي عن W
-    has_w, neckline = detect_w_pattern(df)
-
-    neckline_break = (
-        has_w
-        and neckline is not None
-        and price > neckline
-    )
-
-    # دعم فني مبدئي لإبطال فكرة الارتداد
-    stop_level = support20 * 0.99 if support20 else None
-
-    # حساب النقاط الفنية
-    checks = {
-        "قرب الدعم": near_support,
-        "RSI بين 23 و27": (
-            rsi is not None and RSI_MIN <= rsi <= RSI_MAX
-        ),
-        "سحب سيولة واستعادة الدعم": sweep_reclaim,
-        "تحسن MACD": macd_improving or macd_bullish_cross,
-        "فوليوم أعلى من المتوسط مع شمعة صاعدة": volume_confirmation,
-        "شمعة ارتداد محتملة": bool(candles),
-        "استعادة متوسط متحرك": bool(recovered_averages),
-    }
-
-    score = sum(checks.values())
-
-    # النتائج
-    print(f"السعر الحالي: {price:.4f}")
-    print(f"التغير اليومي: {daily_change:.2f}%")
-    print(f"RSI: {rsi:.2f}" if rsi is not None else "RSI: غير متاح")
-
-    print("\nالمتوسطات:")
-    for period in [20, 30, 50, 200]:
-        ema = number(current[f"EMA{period}"])
-        sma = number(current[f"SMA{period}"])
-
-        print(
-            f"EMA{period}: {ema:.4f} | SMA{period}: {sma:.4f}"
-            if ema is not None and sma is not None
-            else f"MA{period}: غير متاح"
-        )
-
     print("\nالدعم والمقاومة:")
-    print(f"الدعم التقريبي: {support20:.4f}" if support20 else "الدعم: غير متاح")
-    print(f"أدنى سعر خلال 60 جلسة: {low60:.4f}" if low60 else "القاع: غير متاح")
-    print(f"المقاومة التقريبية: {resistance20:.4f}" if resistance20 else "المقاومة: غير متاحة")
 
-    print("\nالفوليوم:")
-    print(f"حجم اليوم: {latest_volume:,.0f}")
-    print(f"متوسط الحجم: {avg_volume:,.0f}")
+    print(f"الدعم التقريبي: {fmt(support)}")
+    print(f"المقاومة التقريبية: {fmt(resistance)}")
+
+    lowest_60 = number(df["Low"].tail(60).min())
+
+    print(f"أدنى سعر خلال 60 جلسة: {fmt(lowest_60)}")
+
+    print("\nحجم التداول:")
+
+    print(f"حجم اليوم: {fmt(volume)}")
+    print(f"متوسط الحجم: {fmt(average_volume)}")
 
     print("\nMACD:")
-    print(f"MACD: {macd:.4f}" if macd is not None else "MACD: غير متاح")
-    print(f"Signal: {signal:.4f}" if signal is not None else "Signal: غير متاح")
-    print(f"تحسن الزخم: {'نعم' if macd_improving else 'لا'}")
-    print(f"تقاطع إيجابي جديد: {'نعم' if macd_bullish_cross else 'لا'}")
 
-    print("\nفحص شروط منهج فيصل:")
-    for name, passed in checks.items():
-        print(f"{'✓' if passed else '✗'} {name}")
+    print(f"MACD: {fmt(macd)}")
+    print(f"Signal: {fmt(signal)}")
+    print(f"Histogram: {fmt(histogram)}")
+
+    macd_improving = (
+        histogram is not None
+        and previous_histogram is not None
+        and histogram > previous_histogram
+    )
+
+    print(
+        "تحسن الزخم: "
+        + ("نعم" if macd_improving else "لا")
+    )
+
+    bullish_cross = (
+        macd is not None
+        and signal is not None
+        and macd > signal
+        and number(previous["MACD"]) is not None
+        and number(previous["Signal"]) is not None
+        and number(previous["MACD"]) <= number(previous["Signal"])
+    )
+
+    print(
+        "تقاطع إيجابي جديد: "
+        + ("نعم" if bullish_cross else "لا")
+    )
+
+    candle = detect_candle(df)
+
+    sweep, previous_support = detect_liquidity_sweep(df)
+
+    w_pattern = detect_w_pattern(df)
+
+    print("\nفحص سحب السيولة:")
+
+    if sweep:
+        print("ظهرت إشارة تقريبية لكسر قاع سابق ثم استعادة المستوى")
+        print(f"المستوى المستعاد: {fmt(previous_support)}")
+    else:
+        print("لم تتأكد إشارة سحب السيولة واستعادة المستوى")
 
     print("\nالشموع:")
-    print(", ".join(candles) if candles else "لم تظهر شمعة ارتداد من الأنماط البسيطة")
+    print(candle)
 
     print("\nنموذج W:")
-    if has_w:
-        print(f"نموذج محتمل، خط العنق التقريبي: {neckline:.4f}")
-        print(
-            "تجاوز خط العنق"
-            if neckline_break
-            else "لم يتأكد تجاوز خط العنق"
-        )
+
+    if w_pattern["possible"]:
+        print("نموذج محتمل")
+        print(f"خط العنق التقريبي: {fmt(w_pattern['neckline'])}")
+        print(w_pattern["reason"])
     else:
-        print("لم يتم رصد نموذج W واضح حسابيًا")
+        print(w_pattern["reason"])
+
+    # التغير خلال 20 جلسة
+    change_20 = None
+
+    if len(df) >= 21:
+        old_price = number(df["Close"].iloc[-21])
+
+        if old_price and old_price > 0:
+            change_20 = (price / old_price - 1) * 100
 
     print("\nمخاطر مطاردة السعر:")
-    print(f"الارتفاع خلال 20 جلسة: {rise20:.2f}%")
 
-    if chasing_warning:
-        print("تحذير: ارتفاع قوي؛ لا تطارد السهم، وانتظر إعادة اختبار أو سحب سيولة.")
+    if change_20 is not None:
+        print(f"التغير خلال 20 جلسة: {change_20:+.2f}%")
 
-    print("\nوقف فني مبدئي:")
-    if stop_level is not None:
-        print(f"مستوى متابعة تقريبي: {stop_level:.4f}")
-        print("هذا ليس أمر وقف مضمونًا، ويجب التحقق من الدعم الحقيقي على الرسم.")
+        if change_20 >= 20:
+            print("تحذير: لا تطارد ارتفاعًا قويًا دون إعادة اختبار")
     else:
-        print("غير متاح")
+        print("بيانات غير كافية")
 
-    print("\nالنتيجة الأولية:")
+    # وقف الخسارة والهدف تقديريان فقط
+    print("\nمستويات فنية تقديرية:")
 
-    if chasing_warning:
-        print("انتظار إعادة اختبار أو سحب سيولة؛ لا تطارد الصعود.")
-    elif (
-        near_support
-        and score >= MIN_WATCH_SCORE
-        and (sweep_reclaim or candles or macd_improving)
-    ):
-        print("مرشح للمراقبة المتقدمة؛ راجع الشارت والثبات قبل أي قرار.")
-    elif near_support:
-        print("قريب من الدعم، لكن انتظر تأكيد فني إضافي.")
+    stop = None
+    target = None
+    entry_low = None
+    entry_high = None
+
+    if support is not None and support > 0:
+        stop = support * 0.98
+
+        if price >= support:
+            entry_low = support
+            entry_high = support * 1.02
+
+    if resistance is not None and resistance > price:
+        target = resistance
+
+    print(
+        f"منطقة دخول للمراقبة: "
+        f"{fmt(entry_low)} - {fmt(entry_high)}"
+        if entry_low is not None
+        else "لا توجد منطقة دخول مناسبة محسوبة"
+    )
+
+    print(f"وقف فني تقديري: {fmt(stop)}")
+    print(f"الهدف الفني الأول: {fmt(target)}")
+
+    if entry_low is not None and stop is not None:
+        risk = entry_low - stop
+        reward = target - entry_low if target is not None else None
+
+        if risk > 0 and reward is not None and reward > 0:
+            print(
+                f"العائد إلى المخاطرة التقريبي: "
+                f"1:{reward / risk:.2f}"
+            )
+
+    status, score, reasons = classify_stock(
+        price=price,
+        rsi=rsi,
+        support=support,
+        resistance=resistance,
+        macd=macd,
+        signal=signal,
+        histogram=histogram,
+        previous_histogram=previous_histogram,
+        volume=volume,
+        average_volume=average_volume,
+        candle=candle,
+        sweep=sweep,
+        w_pattern=w_pattern,
+        recovered_averages=recovered_averages
+    )
+
+    print("\n" + "=" * 48)
+    print("التصنيف النهائي:")
+    print(status)
+    print(f"درجة الشروط المتحققة: {score}")
+
+    print("\nأسباب التصنيف:")
+
+    if reasons:
+        for reason in reasons:
+            print(f"- {reason}")
     else:
-        print("ليس مرشح ارتكاز مكتمل الشروط حاليًا.")
+        print("- لم تتحقق شروط فنية كافية")
 
-    # البيانات الخارجية: الفلووت والشورت والأخبار
-    print("\nبيانات الشركة والأخبار:")
+    if support is not None and price < support:
+        print(
+            "\nتنبيه: كسر الدعم المحسوب لا يثبت وحده "
+            "استمرار الهبوط أو حدوث سحب سيولة."
+        )
+
+    print("\nبيانات الشركة:")
+
     company = get_company_data(symbol)
 
-    if company["float"] is not None:
-        print(f"Float: {company['float']:,}")
-    else:
-        print("Float: غير متاح من مصدر البيانات")
+    print(f"Float: {fmt(company['float'])}")
+    print(f"Shares Short: {fmt(company['short'])}")
+    print(
+        f"Short % of Float: {fmt(company['short_percent'])}%"
+        if company["short_percent"] is not None
+        else "Short % of Float: غير متوفر"
+    )
 
-    if company["short"] is not None:
-        print(f"Shares Short: {company['short']:,}")
-    else:
-        print("Shares Short: غير متاحة")
+    print(
+        "\nتنبيه: التحليل آلي وتعليمي، "
+        "والبيانات اليومية لا تؤكد وحدها توقيت الدخول."
+    )
 
-    if company["short_pct"] is not None:
-        print(f"Short % of Float: {company['short_pct']:.2%}")
-    else:
-        print("نسبة الشورت إلى الفلووت: غير متاحة")
 
-    if company["news"]:
-        for title in company["news"]:
-            print(f"- {title}")
-    else:
-        print("لم تتوفر عناوين أخبار من مصدر البيانات.")
-
-    print("\nتنبيه: هذا فحص آلي أولي وليس توصية شراء أو بيع.")
-
+# ==========================================
+# تشغيل البوت
+# ==========================================
 
 def main():
+    print("بدء ماسح الأسهم - منهج فيصل")
+    print("الفاصل الزمني: يومي")
+    print("البيانات من Yahoo Finance")
+
     symbols = load_watchlist()
 
     if not symbols:
-        print("أضف رموز الأسهم إلى watchlist.csv أولًا.")
+        print("قائمة الأسهم فارغة أو غير صالحة.")
         return
 
-    print("بدء فحص الأسهم وفق شروط منهج فيصل")
     print(f"عدد الأسهم: {len(symbols)}")
 
     for symbol in symbols:
         try:
             analyze_stock(symbol)
-        except Exception as error:
-            print(f"{symbol}: حدث خطأ أثناء الفحص: {error}")
+        except Exception as exc:
+            print(f"حدث خطأ أثناء تحليل {symbol}: {exc}")
 
-        time.sleep(1)
+    print("\nانتهى فحص جميع الأسهم.")
 
 
 if __name__ == "__main__":
