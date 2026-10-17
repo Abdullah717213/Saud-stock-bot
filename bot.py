@@ -253,14 +253,13 @@ def detect_candle(df):
     ):
         return "ابتلاع شرائي محتمل"
 
-    # مطرقة محتملة
+# مطرقة محتملة مع إغلاق في الجزء العلوي من الشمعة
     if (
-        lower_wick >= body * 2
-        and upper_wick <= max(body, candle_range * 0.15)
-        and c > l + candle_range * 0.55
+        lower_wick >= max(body * 2, candle_range * 0.30)
+        and upper_wick <= candle_range * 0.15
+        and c > l + candle_range * 0.60
     ):
         return "مطرقة محتملة"
-
     # شمعة صاعدة قوية
     if (
         c > o
