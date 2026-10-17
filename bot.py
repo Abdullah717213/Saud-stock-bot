@@ -546,7 +546,7 @@ def classify_stock(
             "اختراق نموذج W مع ظهور شمعة إيجابية"
         )
 
-   elif (
+    elif (
         score >= 2
         or near_support
     ):
