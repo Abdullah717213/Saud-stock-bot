@@ -809,7 +809,7 @@ def analyze_stock(symbol):
         return
 
     if float_shares >= 5_000_000:
-    print(
+        print(
         f"❌ مستبعد: Float يبلغ {float_shares:,.0f} سهم "
         "والحد المطلوب أقل من 5 ملايين"
     )
