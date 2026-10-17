@@ -671,7 +671,7 @@ def analyze_stock(symbol):
     average_volume = number(current["VolumeAvg20"])
 
     support = number(current["NearestSupport"])
-resistance = number(current["NearestResistance"])
+    resistance = number(current["NearestResistance"])
 
     print(f"السعر الحالي: ${price:.4f}")
 
