@@ -705,17 +705,17 @@ def analyze_stock(symbol):
 
     print("\nمستويات فنية تقديرية:")
 
-stop = None
-target = None
-entry_low = None
-entry_high = None
+    stop = None
+    target = None
+    entry_low = None
+    entry_high = None
 
-if support is not None and support > 0:
-    stop = support * 0.98
+    if support is not None and support > 0:
+        stop = support * 0.98
 
     if support <= price <= support * 1.03:
-        entry_low = support
-        entry_high = support * 1.02
+            entry_low = support
+            entry_high = support * 1.02
 
 # البحث عن أقرب هدف فني أعلى من السعر
 candidates = []
