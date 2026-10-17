@@ -243,7 +243,7 @@ df["Resistance60"] = (
 )
 
 df["NearestResistance"] = np.nan
-gfor i in range(60, len(df)):
+for i in range(60, len(df)):
     price = df["Close"].iloc[i]
     previous_highs = df["High"].iloc[i - 60:i]
 
