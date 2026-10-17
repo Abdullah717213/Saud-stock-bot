@@ -214,6 +214,26 @@ df["Support20"] = (
     .rolling(20)
     .min()
 )
+df["NearestSupport"] = np.nan
+
+for i in range(20, len(df)):
+    price = df["Close"].iloc[i]
+    previous_lows = df["Low"].iloc[i - 20:i]
+
+    # القاع المحلي أقل من الشمعة السابقة وأقل من أو يساوي اللاحقة
+    local_troughs = (
+        (previous_lows < previous_lows.shift(1)) &
+        (previous_lows <= previous_lows.shift(-1))
+    )
+
+    # القيعان التي تقع أسفل السعر الحالي
+    levels = previous_lows[local_troughs & (previous_lows < price)]
+
+    if not levels.empty:
+        df.iloc[
+            i,
+            df.columns.get_loc("NearestSupport")
+        ] = levels.max()
 
 df["Resistance60"] = (
     df["High"]
