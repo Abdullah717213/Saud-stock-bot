@@ -703,7 +703,7 @@ def analyze_stock(symbol):
     else:
         print("بيانات غير كافية")
 
-print("\nمستويات فنية تقديرية:")
+    print("\nمستويات فنية تقديرية:")
 
 stop = None
 target = None
