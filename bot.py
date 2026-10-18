@@ -135,8 +135,8 @@ def download_daily(symbol):
 # ==========================================
 
 def add_indicators(df):
-df = df.copy()
-close = df["Close"]
+    df = df.copy()
+    close = df["Close"]
 
 # المتوسطات المتحركة
 for period in [20, 30, 50, 200]:
