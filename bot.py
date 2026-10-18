@@ -42,7 +42,7 @@ def fmt(value):
     return "غير متوفر" if value is None else f"{value:.4f}"
 
 
-def load_watchlist():
+def discover_stocks():
     if not os.path.exists(WATCHLIST_FILE):
         print(f"لم يتم العثور على {WATCHLIST_FILE}")
         return []
