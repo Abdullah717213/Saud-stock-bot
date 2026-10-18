@@ -866,7 +866,7 @@ def main():
     print("الفاصل الزمني: يومي")
     print("البيانات من Yahoo Finance")
 
-    symbols = load_watchlist()
+    symbols = discover_stocks()
 
     if not symbols:
         print("قائمة الأسهم فارغة أو غير صالحة.")
