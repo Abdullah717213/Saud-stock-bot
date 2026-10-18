@@ -138,85 +138,103 @@ def add_indicators(df):
     df = df.copy()
     close = df["Close"]
 
-# المتوسطات المتحركة
-for period in [20, 30, 50, 200]:
-    df[f"EMA{period}"] = close.ewm(
-        span=period,
+    # المتوسطات المتحركة
+    for period in [20, 30, 50, 200]:
+        df[f"EMA{period}"] = close.ewm(
+            span=period,
+            adjust=False
+        ).mean()
+        df[f"SMA{period}"] = close.rolling(
+            period
+        ).mean()
+
+    # RSI - طريقة Wilder
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.ewm(
+        alpha=1 / 14,
+        min_periods=14,
         adjust=False
     ).mean()
-    df[f"SMA{period}"] = close.rolling(
-        period
-    ).mean()
-# RSI - طريقة Wilder
-delta = close.diff()
-gain = delta.clip(lower=0)
-loss = -delta.clip(upper=0)
-avg_gain = gain.ewm(
-    alpha=1 / 14,
-    min_periods=14,
-    adjust=False
-).mean()
-avg_loss = loss.ewm(
-    alpha=1 / 14,
-    min_periods=14,
-    adjust=False
-).mean()
-rs = avg_gain / avg_loss.replace(0, np.nan)
-df["RSI"] = 100 - (100 / (1 + rs))
-# معالجة حالة عدم وجود خسائر
-df.loc[(avg_loss == 0) & (avg_gain > 0), "RSI"] = 100
-df.loc[(avg_loss == 0) & (avg_gain == 0), "RSI"] = 50
-# MACD
-ema12 = close.ewm(span=12, adjust=False).mean()
-ema26 = close.ewm(span=26, adjust=False).mean()
-df["MACD"] = ema12 - ema26
-df["Signal"] = df["MACD"].ewm(
-    span=9,
-    adjust=False
-).mean()
-df["Histogram"] = df["MACD"] - df["Signal"]
-# متوسط حجم التداول
-df["VolumeAvg20"] = df["Volume"].rolling(20).mean()
-# الدعم السابق
-df["Support20"] = df["Low"].shift(1).rolling(20).min()
-df["NearestSupport"] = np.nan
-# أقرب قاع محلي أسفل السعر
-for i in range(20, len(df)):
-    price = df["Close"].iloc[i]
-    previous_lows = df["Low"].iloc[i - 20:i]
-    local_troughs = (
-        (previous_lows < previous_lows.shift(1)) &
-        (previous_lows <= previous_lows.shift(-1))
-    )
-    levels = previous_lows[
-        local_troughs & (previous_lows < price)
-    ]
-    if not levels.empty:
-        df.iloc[
-            i,
-            df.columns.get_loc("NearestSupport")
-        ] = levels.max()
-# المقاومة السابقة
-df["Resistance60"] = df["High"].shift(1).rolling(60).max()
-df["NearestResistance"] = np.nan
-# أقرب قمة محلية فوق السعر
-for i in range(60, len(df)):
-    price = df["Close"].iloc[i]
-    previous_highs = df["High"].iloc[i - 60:i]
-    local_peaks = (
-        (previous_highs > previous_highs.shift(1)) &
-        (previous_highs >= previous_highs.shift(-1))
-    )
-    levels = previous_highs[
-        local_peaks & (previous_highs > price)
-    ]
-    if not levels.empty:
-        df.iloc[
-            i,
-            df.columns.get_loc("NearestResistance")
-        ] = levels.min()
-return df
 
+    avg_loss = loss.ewm(
+        alpha=1 / 14,
+        min_periods=14,
+        adjust=False
+    ).mean()
+
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    df["RSI"] = 100 - (100 / (1 + rs))
+
+    # معالجة حالة عدم وجود خسائر
+    df.loc[(avg_loss == 0) & (avg_gain > 0), "RSI"] = 100
+    df.loc[(avg_loss == 0) & (avg_gain == 0), "RSI"] = 50
+
+    # MACD
+    ema12 = close.ewm(span=12, adjust=False).mean()
+    ema26 = close.ewm(span=26, adjust=False).mean()
+
+    df["MACD"] = ema12 - ema26
+    df["Signal"] = df["MACD"].ewm(
+        span=9,
+        adjust=False
+    ).mean()
+    df["Histogram"] = df["MACD"] - df["Signal"]
+
+    # متوسط حجم التداول
+    df["VolumeAvg20"] = df["Volume"].rolling(20).mean()
+
+    # الدعم السابق
+    df["Support20"] = df["Low"].shift(1).rolling(20).min()
+    df["NearestSupport"] = np.nan
+
+    # أقرب قاع محلي أسفل السعر
+    for i in range(20, len(df)):
+        price = df["Close"].iloc[i]
+        previous_lows = df["Low"].iloc[i - 20:i]
+
+        local_troughs = (
+            (previous_lows < previous_lows.shift(1)) &
+            (previous_lows <= previous_lows.shift(-1))
+        )
+
+        levels = previous_lows[
+            local_troughs & (previous_lows < price)
+        ]
+
+        if not levels.empty:
+            df.iloc[
+                i,
+                df.columns.get_loc("NearestSupport")
+            ] = levels.max()
+
+    # المقاومة السابقة
+    df["Resistance60"] = df["High"].shift(1).rolling(60).max()
+    df["NearestResistance"] = np.nan
+
+    # أقرب قمة محلية فوق السعر
+    for i in range(60, len(df)):
+        price = df["Close"].iloc[i]
+        previous_highs = df["High"].iloc[i - 60:i]
+
+        local_peaks = (
+            (previous_highs > previous_highs.shift(1)) &
+            (previous_highs >= previous_highs.shift(-1))
+        )
+
+        levels = previous_highs[
+            local_peaks & (previous_highs > price)
+        ]
+
+        if not levels.empty:
+            df.iloc[
+                i,
+                df.columns.get_loc("NearestResistance")
+            ] = levels.min()
+
+    return df
 # ==========================================
 # تحليل الشموع
 # ==========================================
