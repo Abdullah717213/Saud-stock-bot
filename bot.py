@@ -43,43 +43,51 @@ def fmt(value):
 
 
 def discover_stocks():
-    if not os.path.exists(WATCHLIST_FILE):
-        print(f"لم يتم العثور على {WATCHLIST_FILE}")
-        return []
+url = “https://api.nasdaq.com/api/screener/stocks”
 
+headers = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json, text/plain, */*",
+    "Origin": "https://www.nasdaq.com",
+    "Referer": "https://www.nasdaq.com/"
+}
+symbols = set()
+for exchange in ["NASDAQ", "NYSE", "AMEX"]:
     try:
-        data = pd.read_csv(WATCHLIST_FILE)
-
-        if data.empty:
-            return []
-
-        # دعم أسماء الأعمدة الشائعة
-        column = next(
-            (
-                col for col in data.columns
-                if str(col).strip().lower()
-                in ["symbol", "ticker", "symbols", "رمز", "السهم"]
-            ),
-            data.columns[0]
+        response = requests.get(
+            url,
+            params={
+                "tableonly": "true",
+                "limit": "5000",
+                "offset": "0",
+                "exchange": exchange,
+                "download": "true"
+            },
+            headers=headers,
+            timeout=30
         )
-
-        symbols = (
-            data[column]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .tolist()
+        response.raise_for_status()
+        data = response.json().get("data", {})
+        rows = data.get("rows", [])
+        for row in rows:
+            symbol = str(row.get("symbol", "")).strip().upper()
+            price_text = str(row.get("lastsale", ""))
+            try:
+                price = float(
+                    price_text.replace("$", "").replace(",", "")
+                )
+            except (ValueError, TypeError):
+                continue
+            if symbol and 1 <= price <= 6:
+                symbols.add(symbol)
+        print(
+            f"تم اكتشاف {len(symbols)} سهمًا حتى الآن"
         )
-
-        return list(dict.fromkeys(
-            s for s in symbols
-            if s and s not in ["SYMBOL", "TICKER", "NAN"]
-        ))
-
     except Exception as exc:
-        print(f"خطأ في قراءة قائمة الأسهم: {exc}")
-        return []
+        print(f"تعذر جلب أسهم {exchange}: {exc}")
+result = sorted(symbols)
+print(f"إجمالي الأسهم المكتشفة بسعر 1–6 دولارات: {len(result)}")
+return result
 
 
 def download_daily(symbol):
