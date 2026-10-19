@@ -43,7 +43,7 @@ def fmt(value):
 
 
 def discover_stocks():
-url = “https://api.nasdaq.com/api/screener/stocks”
+url = "https://api.nasdaq.com/api/screener/stocks"
 
 headers = {
     "User-Agent": "Mozilla/5.0",
