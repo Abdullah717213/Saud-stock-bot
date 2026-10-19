@@ -43,18 +43,18 @@ def fmt(value):
 
 
 def discover_stocks():
-url = "https://api.nasdaq.com/api/screener/stocks"
+    url = "https://api.nasdaq.com/api/screener/stocks"
 
-headers = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept": "application/json, text/plain, */*",
-    "Origin": "https://www.nasdaq.com",
-    "Referer": "https://www.nasdaq.com/"
-}
-symbols = set()
-for exchange in ["NASDAQ", "NYSE", "AMEX"]:
-    try:
-        response = requests.get(
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.nasdaq.com",
+        "Referer": "https://www.nasdaq.com/"
+    }
+    symbols = set()
+    for exchange in ["NASDAQ", "NYSE", "AMEX"]:
+        try:
+            response = requests.get(
             url,
             params={
                 "tableonly": "true",
