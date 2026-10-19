@@ -44,51 +44,53 @@ def fmt(value):
 
 def discover_stocks():
     url = "https://api.nasdaq.com/api/screener/stocks"
-
     headers = {
         "User-Agent": "Mozilla/5.0",
         "Accept": "application/json, text/plain, */*",
         "Origin": "https://www.nasdaq.com",
         "Referer": "https://www.nasdaq.com/"
     }
+
     symbols = set()
+
     for exchange in ["NASDAQ", "NYSE", "AMEX"]:
         try:
             response = requests.get(
-            url,
-            params={
-                "tableonly": "true",
-                "limit": "5000",
-                "offset": "0",
-                "exchange": exchange,
-                "download": "true"
-            },
-            headers=headers,
-            timeout=30
-        )
-        response.raise_for_status()
-        data = response.json().get("data", {})
-        rows = data.get("rows", [])
-        for row in rows:
-            symbol = str(row.get("symbol", "")).strip().upper()
-            price_text = str(row.get("lastsale", ""))
-            try:
-                price = float(
-                    price_text.replace("$", "").replace(",", "")
-                )
-            except (ValueError, TypeError):
-                continue
-            if symbol and 1 <= price <= 6:
-                symbols.add(symbol)
-        print(
-            f"تم اكتشاف {len(symbols)} سهمًا حتى الآن"
-        )
-    except Exception as exc:
-        print(f"تعذر جلب أسهم {exchange}: {exc}")
-result = sorted(symbols)
-print(f"إجمالي الأسهم المكتشفة بسعر 1–6 دولارات: {len(result)}")
-return result
+                url,
+                params={
+                    "tableonly": "true",
+                    "limit": "5000",
+                    "offset": "0",
+                    "exchange": exchange,
+                    "download": "true"
+                },
+                headers=headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            data = response.json().get("data", {})
+            rows = data.get("rows", [])
 
+            for row in rows:
+                symbol = str(row.get("symbol", "")).strip().upper()
+                price_text = str(row.get("lastsale", ""))
+
+                try:
+                    price = float(
+                        price_text.replace("$", "").replace(",", "")
+                    )
+                except (ValueError, TypeError):
+                    continue
+
+                if symbol and 1 <= price <= 6:
+                    symbols.add(symbol)
+
+        except Exception as exc:
+            print(f"تعذر جلب أسهم {exchange}: {exc}")
+
+    result = sorted(symbols)
+    print(f"عدد الأسهم المكتشفة بسعر 1–6 دولارات: {len(result)}")
+    return result
 
 def download_daily(symbol):
     try:
